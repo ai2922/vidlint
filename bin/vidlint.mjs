@@ -229,8 +229,9 @@ async function main() {
   if (options.listRules) {
     process.stdout.write("Rules vidlint can report:\n\n");
     for (const rule of RULES) {
+      const tags = [rule.severity, rule.optIn ? "opt-in" : null].filter(Boolean).join(", ");
       process.stdout.write(
-        `  ${rule.id.padEnd(22)} ${rule.severity.padEnd(6)}${rule.optIn ? " (opt-in)" : ""}\n` +
+        `  ${rule.id.padEnd(22)} [${tags}]\n` +
           `      ${rule.title}\n` +
           `      ${rule.summary}\n`,
       );
