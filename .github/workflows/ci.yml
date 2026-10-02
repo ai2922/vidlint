@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # vidlint is meant to work identically everywhere, and the parts most
+        # likely to differ by platform are process spawning and path handling,
+        # so all three platforms are exercised.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ["20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install ffmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+
+      - name: Verify ffmpeg is reachable
+        run: ffmpeg -version
+
+      - name: Unit tests (no ffmpeg required)
+        run: node --test test/unit.test.mjs
+
+      - name: End-to-end and MCP tests
+        run: node --test test/e2e.test.mjs test/mcp.test.mjs
+
+  smoke:
+    name: CLI smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: FedericoCarboni/setup-ffmpeg@v3
+
+      - name: Build the fixtures
+        run: node test/helpers/fixtures.mjs .fixtures
+
+      - name: Clean footage must pass
+        run: node bin/vidlint.mjs .fixtures/good.mp4 --quiet
+
+      - name: Broken footage must fail
+        shell: bash
+        run: |
+          set +e
+          node bin/vidlint.mjs .fixtures/bad.mp4 --quiet
+          status=$?
+          if [ "$status" -ne 1 ]; then
+            echo "expected exit code 1 for bad.mp4, got $status"
+            exit 1
+          fi
+
+      - name: JSON output must be valid and schema-versioned
+        shell: bash
+        run: |
+          set +e
+          node bin/vidlint.mjs .fixtures/bad.mp4 --json --quiet > report.json
+          node -e "
+            const r = require('./report.json');
+            if (r.schemaVersion !== '1.0') throw new Error('bad schemaVersion');
+            if (!r.defects.some(d => d.id === 'frozen-with-audio')) {
+              throw new Error('the headline rule did not fire on the fixture');
+            }
+            console.log('report ok:', r.summary);
+          "

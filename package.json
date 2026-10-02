@@ -1,0 +1,43 @@
+{
+  "name": "vidlint",
+  "version": "0.1.0",
+  "description": "Objective QA for generated video. Catches dead air, blank and frozen frames, unsafe-area content, flash/strobe risk and broken audio before your audience does.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "vidlint": "./bin/vidlint.mjs",
+    "vidlint-mcp": "./src/mcp/server.mjs"
+  },
+  "main": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./mcp": "./src/mcp/server.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "video",
+    "qa",
+    "lint",
+    "ffmpeg",
+    "remotion",
+    "ai-video",
+    "dead-air",
+    "accessibility",
+    "mcp"
+  ],
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "test:unit": "node --test test/unit.test.mjs",
+    "fixtures": "node test/helpers/fixtures.mjs .fixtures"
+  },
+  "dependencies": {}
+}

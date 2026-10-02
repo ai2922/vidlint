@@ -1,0 +1,11 @@
+# Generated test fixtures, rebuilt on demand by test/helpers/fixtures.mjs.
+.fixtures/
+
+# Dependencies (vidlint has none at runtime, but tooling may add some).
+node_modules/
+
+# Scratch output
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

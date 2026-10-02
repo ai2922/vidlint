@@ -1,0 +1,9 @@
+# Normalise line endings so the repo behaves identically on Windows and Unix.
+# The CI workflow runs a bash step, which must not receive CRLF.
+* text=auto eol=lf
+
+# Binary assets must never be normalised.
+*.png binary
+*.jpg binary
+*.mp4 binary
+*.ico binary
