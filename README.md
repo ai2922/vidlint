@@ -292,9 +292,13 @@ against.
 ## Development
 
 ```bash
-node --test test/            # everything
-node --test test/unit.test.mjs   # pure functions, no ffmpeg
+npm test                          # everything
+node --test "test/*.test.mjs"     # same thing without npm
+node --test test/unit.test.mjs    # pure functions, no ffmpeg needed
 ```
+
+> Note: pass a glob or an explicit file list. `node --test test/` tries to load
+> the directory as a module on Node 22 and fails.
 
 The test suite generates its own fixtures with `ffmpeg` on first run — nothing
 binary is committed. `bad.mp4` plants known defects so the checks are verified

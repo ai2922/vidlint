@@ -21,14 +21,35 @@
  * because `testsrc2` is a pathologically busy full-bleed pattern that trips the
  * heuristic on every border.
  *
+ * CONCURRENCY: Node's test runner executes test files in parallel, so several
+ * processes call `ensureFixtures()` on the same directory at once. Two things
+ * make that safe:
+ *
+ *   1. Each build happens in its own `mkdtempSync` working directory, so no two
+ *      processes ever share a scratch path.
+ *   2. A finished fixture is published with `renameSync`, which is atomic
+ *      within a filesystem. A reader therefore either sees no file or a
+ *      complete one - never a half-written video.
+ *
+ * Without this, a concurrent run produced a truncated `bad.mp4`, which silently
+ * reported zero defects instead of failing loudly.
+ *
  * NOTE: source files in this repository are deliberately ASCII-only. Editing
  * them with PowerShell's Set-Content round-trips them through the ANSI codepage
  * and silently corrupts multi-byte characters.
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 const W = 640;
 const H = 360;
@@ -45,22 +66,22 @@ function ffmpeg(args, label) {
   }
 }
 
+/** Common encoder settings, identical across every fixture. */
+function encodeArgs() {
+  return [
+    "-c:v", "libx264",
+    "-pix_fmt", "yuv420p",
+    "-r", String(FPS),
+    "-c:a", "aac",
+    "-ar", "44100",
+    "-ac", "1",
+    "-b:a", "128k",
+  ];
+}
+
 /** Encode a lavfi-driven segment with parameters identical across all segments. */
 function segment(outPath, args) {
-  ffmpeg(
-    [
-      ...args,
-      "-c:v", "libx264",
-      "-pix_fmt", "yuv420p",
-      "-r", String(FPS),
-      "-c:a", "aac",
-      "-ar", "44100",
-      "-ac", "1",
-      "-b:a", "128k",
-      outPath,
-    ],
-    outPath,
-  );
+  ffmpeg([...args, ...encodeArgs(), outPath], outPath);
 }
 
 function concat(listPath, outPath) {
@@ -68,7 +89,40 @@ function concat(listPath, outPath) {
 }
 
 /**
+ * Build `dest` unless it already exists, publishing it atomically.
+ *
+ * @param {string} dest          final fixture path
+ * @param {(tmpPath: string, workDir: string) => void} build
+ */
+function publishIfMissing(dest, build) {
+  if (existsSync(dest)) return;
+
+  mkdirSync(dirname(dest), { recursive: true });
+  const work = mkdtempSync(join(dirname(dest), ".build-"));
+
+  try {
+    const tmp = join(work, basename(dest));
+    build(tmp, work);
+    if (!existsSync(tmp)) return;
+
+    try {
+      renameSync(tmp, dest);
+    } catch (err) {
+      // Another process published this fixture first. On Windows rename refuses
+      // to clobber, which is exactly the outcome we want anyway.
+      const code = /** @type {NodeJS.ErrnoException} */ (err).code;
+      if (code === "EEXIST" || code === "EPERM" || code === "ENOTEMPTY" || code === "EACCES") return;
+      throw err;
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+/**
  * Generate the fixtures into `dir` if they are not already present.
+ * Safe to call concurrently from several processes.
+ *
  * @param {string} dir
  * @returns {{good:string, bad:string, clean:string}}
  */
@@ -77,48 +131,30 @@ export function ensureFixtures(dir) {
   const bad = join(dir, "bad.mp4");
   const clean = join(dir, "clean-bg.mp4");
 
-  if (existsSync(good) && existsSync(bad) && existsSync(clean)) return { good, bad, clean };
-
   mkdirSync(dir, { recursive: true });
-  const work = join(dir, "_segments");
-  rmSync(work, { recursive: true, force: true });
-  mkdirSync(work, { recursive: true });
 
-  try {
-    buildGood(good, work);
-    buildBad(bad, work);
-    buildCleanBackground(clean);
-  } finally {
-    rmSync(work, { recursive: true, force: true });
-  }
+  publishIfMissing(good, (tmp) => buildGood(tmp));
+  publishIfMissing(bad, (tmp, work) => buildBad(tmp, work));
+  publishIfMissing(clean, (tmp) => buildCleanBackground(tmp));
 
   return { good, bad, clean };
 }
 
-function buildGood(good, work) {
-  if (existsSync(good)) return;
+function buildGood(out) {
   ffmpeg(
     [
       "-f", "lavfi", "-i", `testsrc2=size=${W}x${H}:rate=${FPS}:duration=6`,
       "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=6",
       "-af", "volume=8dB",
-      "-c:v", "libx264",
-      "-pix_fmt", "yuv420p",
-      "-r", String(FPS),
-      "-c:a", "aac",
-      "-ar", "44100",
-      "-ac", "1",
-      "-b:a", "128k",
+      ...encodeArgs(),
       "-shortest",
-      good,
+      out,
     ],
     "good",
   );
 }
 
-function buildBad(bad, work) {
-  if (existsSync(bad)) return;
-
+function buildBad(out, work) {
   // A textured still to freeze on - it must be non-uniform so the blank check
   // does not claim it, which is exactly the case the audio join classifies.
   const still = join(work, "still.png");
@@ -158,6 +194,8 @@ function buildBad(bad, work) {
     "-vf", `drawbox=x=180:y=${H - 46}:w=280:h=30:color=white@1.0:t=fill`,
   ]);
 
+  // The concat demuxer resolves `file '...'` relative to the list file, so the
+  // list must sit beside the segments.
   const list = join(work, "list.txt");
   writeFileSync(
     list,
@@ -165,7 +203,7 @@ function buildBad(bad, work) {
     "utf8",
   );
 
-  concat(list, bad);
+  concat(list, out);
 }
 
 /**
@@ -173,38 +211,25 @@ function buildBad(bad, work) {
  * single high-contrast banner sitting inside the bottom safe-area band.
  */
 function buildCleanBackground(out) {
-  if (existsSync(out)) return;
-
   // NOTE: ffmpeg 9's `drawbox` does not re-evaluate its x/y expressions per
   // frame, so a moving drawbox renders a perfectly static video. `overlay`
   // does honour `t`, so the animated element is composited with overlay and
   // only the static banner uses drawbox.
   const filter = [
-    // A slowly orbiting accent block, so the picture is always changing.
     "overlay=x='200+90*sin(2*PI*t/1.5)':y='110+40*cos(2*PI*t/1.5)'",
-    // The planted offender: a bright banner inside the bottom safe-area band.
     "drawbox=x=180:y=318:w=280:h=28:color=white@1.0:t=fill",
   ].join(",");
 
   ffmpeg(
     [
-      "-f", "lavfi",
-      "-i", `color=c=0x0f1115:size=${W}x${H}:rate=${FPS}:duration=6`,
-      "-f", "lavfi",
-      "-i", `color=c=0x2f6fed:size=130x90:rate=${FPS}:duration=6`,
-      "-f", "lavfi",
-      "-i", "sine=frequency=330:sample_rate=44100:duration=6",
+      "-f", "lavfi", "-i", `color=c=0x0f1115:size=${W}x${H}:rate=${FPS}:duration=6`,
+      "-f", "lavfi", "-i", `color=c=0x2f6fed:size=130x90:rate=${FPS}:duration=6`,
+      "-f", "lavfi", "-i", "sine=frequency=330:sample_rate=44100:duration=6",
       "-filter_complex", `[0:v][1:v]${filter}[v]`,
       "-map", "[v]",
       "-map", "2:a",
       "-af", "volume=8dB",
-      "-c:v", "libx264",
-      "-pix_fmt", "yuv420p",
-      "-r", String(FPS),
-      "-c:a", "aac",
-      "-ar", "44100",
-      "-ac", "1",
-      "-b:a", "128k",
+      ...encodeArgs(),
       "-shortest",
       out,
     ],

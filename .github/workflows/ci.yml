@@ -25,16 +25,21 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
-      # FedericoCarboni/setup-ffmpeg publishes no macOS build (it failed on
-      # macos-latest), so macOS takes ffmpeg from the Homebrew that already
-      # ships on GitHub's runners.
-      - name: Install ffmpeg (Linux and Windows)
-        if: runner.os != 'macOS'
-        uses: FedericoCarboni/setup-ffmpeg@v3
+      # FedericoCarboni/setup-ffmpeg proved unreliable: it publishes no macOS
+      # build at all, and it intermittently failed on Linux. Linux and macOS use
+      # their native package managers; Windows keeps the action, where it has
+      # been reliable.
+      - name: Install ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Install ffmpeg (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
+
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        uses: FedericoCarboni/setup-ffmpeg@v3
 
       - name: Verify ffmpeg is reachable
         run: ffmpeg -version
@@ -55,7 +60,8 @@ jobs:
         with:
           node-version: "22"
 
-      - uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Build the fixtures
         run: node test/helpers/fixtures.mjs .fixtures
