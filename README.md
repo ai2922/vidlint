@@ -1,5 +1,9 @@
 # vidlint
 
+[![CI](https://github.com/ai2922/vidlint/actions/workflows/ci.yml/badge.svg)](https://github.com/ai2922/vidlint/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](package.json)
+
 **ESLint for the rendered frame.** Point it at a video file and get back a
 deterministic, machine-readable defect report: blank frames, a picture that
 froze while the audio kept playing, dead air, photosensitivity hazards, silent
